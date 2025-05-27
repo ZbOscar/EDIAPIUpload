@@ -1,0 +1,601 @@
+0001.00  *********************************************************************                              070312
+0002.00  ** COPYRIGHT IBS US - NJ                                           **                              070425
+0003.00  *********************************************************************                              070312
+0004.00  *   Name         -  EVANTOASW                                       *                              080121
+0005.00  *   Description  -  Convert Inbound VAN text files                  *                              071016
+0006.00  *   SRORDERS1 - Order Header                                        *                              080121
+0007.00  *   SRORDERS2 - Address file                                        *                              080121
+0008.00  *   SRORDERS3 - Order detail                                        *                              080121
+0009.00  *   SRODCO    - Document control                                    *                              080121
+0010.00  *                                                                   *                              080121
+0011.00  *   Modification History                                            *                              070312
+0012.00  *                                                                   *                              070312
+0013.00  *   MOD#      Date    Description                                   *                              070312
+0014.00  *   ----    --------- --------------------------                    *                              070312
+0015.00  *   smo     02MAR10   Make line level date =OHRQDS for E3RDDT RDVD  *                              100302
+0016.00  *   smo     04MAR10   Additional date chagnes per Jon Lauber        *                              100304
+0017.00  *           038 - Ship not before                                   *                              100304
+0018.00  *           063 - Do not deliver after                              *                              100304
+0019.00  *           These two dates will be in the field E3SHPM in the format                              100304
+0020.00  *           DND XX-XX-XXXX SNL XX-XX-XXXX                                                          100304
+0021.00  *           037 - Ship not before will be in the request date. E3RDDT                              100304
+0022.00  *           Add PO# to E1SOPE per JL                                                               100304
+0023.00  *   SMO     08MAR10   Make line level date =OHRQDS for E3RDDT RDVD  *                              100308
+0024.00  *                     commented out per request from R.Fowler       *                              100308
+0025.00  *   SMO     10MAR10   Date changes populate -E3RDDB,RDDT,RDVD per   *                              100310
+0026.00  *                     conference call                               *                              100310
+0027.00  *   SMO     02feb11   Date changes populate -E3RDDB,RDDT,RDVD with  *                              110203
+0028.00  *                     OLRQDS when OHRQDS =0                         *                              110203
+0029.00  *   SMO     09feb12   If drop ship populate E1DANO                  *                              120209
+0030.00  *   SMO     20feb12   Fix drop ship address                         *                              120220
+0031.00  *                     Change to use item sent if no xref found      *                              120220
+0032.00  *   SMO     29Jan29   Add Mfg cross reference table Z3BARIMFR-      *                              130129
+0033.00  *                     Z3OARIMFR  MFZ3AMFR -ARI Mfg code 35A         *                              130129
+0034.00  *                                MFZ3OMFR -OSW Mfg Code 35A         *                              130129
+0035.00  *           customers code is in OLPEC 3A                           *                              130129
+0036.00  *   SMO     10Mar15   Map customer item to OLSHPM for everyone      *                              150314
+0037.00  *                     except walmart 925485US00                     *                              150314
+0038.00  * 12/01/20  Paula Macklefresh, The Mesa Group.                                                     201201
+0039.00  *           Reinstate and modify date handling.                                                    201201
+0040.00  * PERRY VOGEL - 07/05/2024 - ADJUST CITY LENGTH FROM 25 TO 30.                                     240705
+0041.00  *                          - DO NOT WRITE BLANK RECORDS TO ORDERS2.                                240705
+0042.00  *   J0015   Nov052024 Perry Vogel (Protelo)- EDI 850 Change         *                              241106
+0043.00  *   COMMIT(*NONE) CLOSQLCSR(*ENDMOD) DBGVIEW(*SOURCE) REPLACE(*YES) *                              241108
+0044.00  *   J0017   Nov272024 Perry Vogel (Protelo)- EDI Documents Need UPC *                              241202
+0045.00  *   J9997   Feb102025 Perry Vogel (Protelo)- Supplier order reference                              250210
+0046.00  *********************************************************************                              070312
+0047.00 FEMOORDERS1O    E           K DISK                                                                  080122
+0048.00 FEMOorders2O    E           K DISK                                                                  080122
+0049.00 FEMOorders3O    E           K DISK                                                                  080122
+0050.00 FEMODCO    O    E           K DISK                                                                  080122
+0051.00 F* NB      O    E           K DISK                                                                  080121
+0052.00 F* EX0     O    E           K DISK                                                                  080121
+0053.00                                                                                                     070425
+0054.00  * Field definitions                                                                                070615
+0055.00                                                                                                     100304
+0056.00 D  CNDYMD         S               D   DATFMT(*MDY)                                                  100304
+0057.00                                                                                                     070615
+0058.00 D  WKECSN         S                   like(DCECSN) INZ(0)                                           080206
+0059.00 D  FIRSTPASS      S              3A   INZ('YES')                                                    080206
+0060.00 D  document       S              3A                                                                 070615
+0061.00 D  counter        S              6s 0                                                               070702
+0062.00                                                                                                     070615
+0063.00  * Data structure - Field redefinitions                                                             070425
+0064.00                                                                                                     070312
+0065.00 D                 DS                                                                                070425
+0066.00                                                                                                     070615
+0067.00 D  trans850       C                   '850'                                                         070615
+0068.00  * File data Structures                                                                             070425
+0069.00                                                                                                     070312
+0070.00 D wiabinds      E DS                  EXTNAME(WIABIN)                                               070614
+0071.00 D winbinds      E DS                  EXTNAME(WINBIN)                                               070614
+0072.00 D wohbinds      E DS                  EXTNAME(WOHBIN)                                               070614
+0073.00 D wolbinds      E DS                  EXTNAME(WOLBIN)                                               070614
+0074.00 D wpecinds      E DS                  EXTNAME(WPECIN)                                               070614
+0075.00 D datainds      E DS                  EXTNAME(INBOUND)                                              070607
+0076.00                                                                                                     070312
+0077.00  * Program Status Data Structure                                                                    070312
+0078.00 D                SDS                                                                                001220
+0079.00 D  PGMNAM           *PROC                                                                           001220
+0080.00 D  wsid                 244    253                                                                  070312 
+0081.00 D  wuserid              254    263                                                                  070312 
+0082.00 d WRKDTE          DS                                                                                100304 
+0083.00 d  CY                     1      4                                                                  100304 
+0084.00 d  MM                     5      6                                                                  100304 
+0085.00 d  DD                     7      8                                                                  100304 
+0086.00  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *                                  070312 
+0087.00  *    M A I N    P R O G R A M    L O G I C                      *                                  070312 
+0088.00  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *                                  070312 
+0089.00  * Entry parameters                                                                                 070615 
+0090.00                                                                                                     070615 
+0091.00 C     *ENTRY        PLIST                                                                           070615 
+0092.00 C                   PARM                    document                                                070615 
+0093.00                                                                                                     070615 
+0094.00                                                                                                     070615 
+0095.00 C                   IF        document = trans850                                                   070615 
+0096.00 C                   exsr      process850                                                            070615 
+0097.00                                                                                                     070615 
+0098.00 C                   ELSE                                                                            070615 
+0099.00                                                                                                     070615 
+0100.00 C                   ENDIF                                                                           070615
+0101.00                                                                                                     070615
+0102.00 C                   move      *on           *inlr                                                   070425
+0103.00                                                                                                     070425
+0104.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070615
+0105.00  ** PROCESS850 - Read and process all other 850 related records      ** **                          070615
+0106.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070615
+0107.00                                                                                                     070615
+0108.00 C     PROCESS850    BEGSR                                                                           070615
+0109.00                                                                                                     070615
+0110.00  * Read any Order Header records and convert                                                        080121
+0111.00                                                                                                     070615
+0112.00 C                   exsr      processORDERS1                                                        080121
+0113.00                                                                                                     070615
+0114.00  * Read any ORDER Detail record and convert                                                         080121
+0115.00                                                                                                     070615
+0116.00 C                   exsr      processORDERS3                                                        080121
+0117.00                                                                                                     070615
+0118.00  * Read any ORDER NOTES records and convert                                                         080121
+0119.00                                                                                                     070615
+0120.00 C                   exsr      processTINB                                                           080121
+0121.00                                                                                                     070615
+0122.00  * Read any Address records and convert                                                             080121
+0123.00                                                                                                     070615
+0124.00 C                   exsr      processORDERS2                                                        080121
+0125.00                                                                                                     070615
+0126.00 C                   ENDSR                                                                           070615
+0127.00                                                                                                     070615
+0128.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070425
+0129.00  ** PROCESSORDERS2 Read and convert order address records            ** **                          080121
+0130.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070425
+0131.00                                                                                                     070425
+0132.00 C     PROCESSORDERS2BEGSR                                                                           080121
+0133.00                                                                                                     070425
+0134.00  * Declare cursor                                                                                   070425
+0135.00                                                                                                     070425
+0136.00 C/EXEC SQL                                                                                          070425
+0137.00 C+   DECLARE ORDS2 CURSOR                                                                           080121
+0138.00 C+   for SELECT *                                                                                   070425
+0139.00 C+       FROM inbound                                                                               070607
+0140.00 C+       WHERE substr(datain,1,2) = 'IA'                                                            070607
+0141.00 C+    FOR FETCH only                                                                                070615
+0142.00 C/END-EXEC                                                                                          070425
+0143.00                                                                                                     070425
+0144.00  * Open Cursor                                                                                      070425
+0145.00                                                                                                     070425
+0146.00 C/EXEC SQL                                                                                          070425
+0147.00 C+   OPEN ORDS2                                                                                     080121
+0148.00 C/END-EXEC                                                                                          070425
+0149.00                                                                                                     070425
+0150.00  * Read first record                                                                                070425
+0151.00                                                                                                     070425
+0152.00 C/EXEC SQL                                                                                          070425
+0153.00 C+   FETCH ORDS2 into :datainds                                                                     080121
+0154.00 C/END-EXEC                                                                                          070425
+0155.00                                                                                                     070425
+0156.00  * Process while records read                                                                       070425
+0157.00                                                                                                     070425
+0158.00 C                   DOW       sqlcod = *zeros                                                       070425
+0159.00 C                   movel     datainds      wiabinds                                                070614
+0160.00 C     OHPOT         ifeq      'DS'                                                                  150504
+0161.00 C     IAEIC         ANDEQ     'ST'                                                                  120425
+0162.00 C                   EVAL      E2PQU1='DP'                                                           120220
+0163.00 C                   EVAL      E2PIDE=IAIDC                                                          120426
+0164.00 C                   EVAL      E2EMSN=IAGUI                                                          120426
+0165.00 C                   EVAL      E2ADTY='D'                                                            120220
+0166.00 C                   EVAL      E2NAME=IANM1                                                          120426
+0167.00 C*                  EVAL      E2CORN=OHCPO                                                          120426
+0168.00 C                   EVAL      E2adr1= IAAD1                                                         120220
+0169.00 C                   EVAL      E2ADR2= IAAD2                                                         120220
+0170.00 C                   EVAL      E2ADR3= IAAD3                                                         120220
+0171.00 C                   EVAL      E2ADR4= IACIT                                                         120220
+0172.00 C                   EVAL      E2COUN= 'US '                                                         120425
+0173.00 C                   EVAL      E2SPCD= IAST                                                          120221
+0174.00 C                   MOVEL     IAST          E2POCD                                                  120220
+0175.00 C                   EVAL      %SUBST(E2POCD:4:10)=IAPST                                             120220
+0176.00 C***J0008                   ENDIF                                                                   240705
+0177.00 C***J0008     ohpot         IFNE      'DS'                                                          240705
+0178.00 C***J0008                   EVAL      E2PQU1='ST'                                                   240705
+0179.00 C***J0008                   EVAL      E2ADTY=' '                                                    240705
+0180.00 C***J0008                   ENDIF                                                                   240705
+0181.00 C***J0008                                                                                           240705
+0182.00                                                                                                     070425
+0183.00 C                   write     ORDERS2                                                               120426
+0184.00 C                                                                                                   240705
+0185.00 C                   ENDIF                                                                           240705
+0186.00 C                                                                                                   240705
+0187.00 C                   MOVE      *BLANKS       datainds                                                120426
+0188.00 C                   EVAL      E2PQU1=*blanks                                                        120426
+0189.00 C                   EVAL      E2PIDE=*blanks                                                        120426
+0190.00 C                   EVAL      E2EMSN=*blanks                                                        120426
+0191.00 C                   EVAL      E2ADTY=' '                                                            120426
+0192.00 C                   EVAL      E2NAME=*blanks                                                        120426
+0193.00 C                   EVAL      E2CORN=*blanks                                                        120426
+0194.00 C                   EVAL      E2adr1= *BLANKS                                                       120426
+0195.00 C                   EVAL      E2ADR2= *blanks                                                       120426
+0196.00 C                   EVAL      E2ADR3= *blanks                                                       120426
+0197.00 C                   EVAL      E2ADR4= *blanks                                                       120426
+0198.00 C                   EVAL      E2COUN= *blanks                                                       120426
+0199.00 C                   EVAL      E2SPCD= *blanks                                                       120426
+0200.00 C                   EVAL      E2pocd=*blanks                                                        120426
+0201.00                                                                                                     070425
+0202.00  * Read next record                                                                                 070425
+0203.00                                                                                                     070425
+0204.00 C/EXEC SQL                                                                                          070425
+0205.00 C+   FETCH ORDS2 into :datainds                                                                     080121
+0206.00 C/END-EXEC                                                                                          070425
+0207.00                                                                                                     070425
+0208.00 C                   ENDDO                                                                           070425
+0209.00                                                                                                     070425
+0210.00  * Close Cursor                                                                                     070425
+0211.00                                                                                                     070425
+0212.00 C/EXEC SQL                                                                                          070425
+0213.00 C+  CLOSE ORDS2                                                                                     080121
+0214.00 C/END-EXEC                                                                                          070425
+0215.00                                                                                                     070425
+0216.00 C                   ENDSR                                                                           070425
+0217.00                                                                                                     070425
+0218.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070425
+0219.00  ** PROCESSTINB - Read and convert any TINB records                  ** **                          070425
+0220.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070425
+0221.00                                                                                                     070425
+0222.00 C     PROCESSTINB   BEGSR                                                                           070425
+0223.00                                                                                                     070425
+0224.00  * Declare cursor                                                                                   070425
+0225.00                                                                                                     070425
+0226.00 C/EXEC SQL                                                                                          070425
+0227.00 C+   DECLARE cinb  CURSOR                                                                           070425
+0228.00 C+   for SELECT *                                                                                   070425
+0229.00 C+       FROM inbound                                                                               070607
+0230.00 C+       WHERE substr(datain,1,2) = 'IN'                                                            070607
+0231.00 C+    FOR FETCH only                                                                                070425
+0232.00 C/END-EXEC                                                                                          070425
+0233.00                                                                                                     070425
+0234.00  * Open Cursor                                                                                      070425
+0235.00                                                                                                     070425
+0236.00 C/EXEC SQL                                                                                          070425
+0237.00 C+   OPEN cinb                                                                                      070425
+0238.00 C/END-EXEC                                                                                          070425
+0239.00                                                                                                     070425
+0240.00  * Read first record                                                                                070425
+0241.00                                                                                                     070425
+0242.00 C/EXEC SQL                                                                                          070425
+0243.00 C+   FETCH cinb into :datainds                                                                      070607
+0244.00 C/END-EXEC                                                                                          070425
+0245.00                                                                                                     070425
+0246.00  * Process while records read                                                                       070425
+0247.00                                                                                                     070425
+0248.00 C                   DOW       sqlcod = *zeros                                                       070425
+0249.00 C                   movel     datainds      winbinds                                                070614
+0250.00                                                                                                     070425
+0251.00 C*                  write     IPI100NB                                                              080121
+0252.00                                                                                                     070425
+0253.00  * Read next record                                                                                 070425
+0254.00                                                                                                     070425
+0255.00 C/EXEC SQL                                                                                          070425
+0256.00 C+   FETCH cinb into :datainds                                                                      070607
+0257.00 C/END-EXEC                                                                                          070425
+0258.00                                                                                                     070425
+0259.00 C                   ENDDO                                                                           070425
+0260.00                                                                                                     070425
+0261.00  * Close Cursor                                                                                     070425
+0262.00                                                                                                     070425
+0263.00 C/EXEC SQL                                                                                          070425
+0264.00 C+  CLOSE cinb                                                                                      070425
+0265.00 C/END-EXEC                                                                                          070425
+0266.00                                                                                                     070425
+0267.00 C                   ENDSR                                                                           070425
+0268.00                                                                                                     070425
+0269.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070425
+0270.00  ** PROCESSORDERS1- Read and convert any Order Header records        *  **                          080121
+0271.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070425
+0272.00                                                                                                     070425
+0273.00 C     PROCESSORDERS1BEGSR                                                                           080121
+0274.00                                                                                                     070425
+0275.00  * Declare cursor                                                                                   070425
+0276.00                                                                                                     070425
+0277.00 C/EXEC SQL                                                                                          070425
+0278.00 C+   DECLARE ords1 CURSOR                                                                           080121
+0279.00 C+   for SELECT *                                                                                   070425
+0280.00 C+       FROM inbound                                                                               070607
+0281.00 C+       WHERE substr(datain,1,2) = 'OH'                                                            070607
+0282.00 C+    FOR FETCH only                                                                                070425
+0283.00 C/END-EXEC                                                                                          070425
+0284.00                                                                                                     070425
+0285.00  * Open Cursor                                                                                      070425
+0286.00                                                                                                     070425
+0287.00 C/EXEC SQL                                                                                          070425
+0288.00 C+   OPEN ords1                                                                                     080121
+0289.00 C/END-EXEC                                                                                          070425
+0290.00                                                                                                     070425
+0291.00  * Read first record                                                                                070425
+0292.00                                                                                                     070425
+0293.00 C/EXEC SQL                                                                                          070425
+0294.00 C+   FETCH ords1 into :datainds                                                                     080121
+0295.00 C/END-EXEC                                                                                          070425
+0296.00                                                                                                     070425
+0297.00  * Process while records read                                                                       070425
+0298.00                                                                                                     070425
+0299.00 C                   DOW       sqlcod = *zeros                                                       070425
+0300.00 C                   movel     datainds      wohbinds                                                070614
+0301.00                                                                                                     070425
+0302.00 C*                  EVAL      E1ECSN=%DEC(OHGUI:15:0)                                               100210
+0303.00 C*                  EVAL      E1HAND='DWRIGHT'                                                      141023
+0304.00 C                   EVAL      E1GDSM=OHOPO                                                          141106
+0305.00 C                   MOVEL     OHREL         WKREL            10                                     141106
+0306.00 C                   MOVEL     OHPON         WKPON            10                                     141106
+0307.00 C                   EVAL      %SUBST(OHPON:1:10)=WKREL                                              141106
+0308.00 C                   EVAL      %SUBST(OHPON:1:10)=WKPON                                              141106
+0309.00 C     WKPON         CAT       WKREL         E1COPE                                                  141110
+0310.00 C                   EVAL      E1CORN=OHCPO                                                          080121
+0311.00 C                   EVAL      E1OREF=OHCPO                                                          080122
+0312.00 C                   EVAL      E1SOPE=OHCPO                                                          100304
+0313.00 C*                  EVAL      E1MPON=OHCPO                                                          080206
+0314.00 C                   EVAL      E1SURF=OHREF                                                          250210
+0315.00 C                   EVAL      E1PIDE=OHSHE                                                          080307
+0316.00 C*                  EVAL      E1EMSN=OHMSN                                                          100210
+0317.00 C                   EVAL      E1EMSN=OHGUI                                                          100211
+0318.00 C*                  EVAL      E1PIDE=OHSID                                                          080222
+0319.00 C                   EVAL      E1PRID=OHSID                                                          080222
+0320.00 C                   EVAL      E1MOTC=OHRTE                                                          250311
+0321.00 C*                  EVAL      E2ECSN=%DEC(OHGUI:15:0)                                               100210
+0322.00                                                                                                     080121
+0323.00                                                                                                     080206
+0324.00 C*                  EVAL      DCECSN=%DEC(OHGUI:15:0)                                               100210
+0325.00 C                   EVAL      DCKEY1=OHSHE                                                          080307
+0326.00 C                   EVAL      DCEADR=OHSHE                                                          080307
+0327.00 C                   EVAL      DCKEY2=OHCPO                                                          080121
+0328.00 C                   EVAL      DCIDOC='ORDERS'                                                       080124
+0329.00 C*                  EVAL      DCEMSN=OHMSN                                                          100210
+0330.00 C                   EVAL      DCEMSN=OHGUI                                                          100211
+0331.00 C                   EVAL      DCMENA='EDI/400'                                                      080124
+0332.00 C                   EVAL      DCMEST='ANSI/X12'                                                     100210
+0333.00 C                   EVAL      DCIDOS=1                                                              080206
+0334.00 C                   EVAL      DCEDOC='850'                                                          080121
+0335.00 C                   EVAL      DCDIRE='R'                                                            080121
+0336.00 C                   EVAL      DCESTA=1                                                              080206
+0337.00 C     OHPOT         IFEQ      'DS'                                                                  120209
+0338.00 C                   EVAL      E1DANO=999                                                            120209
+0339.00 C                   ELSE                                                                            120209
+0340.00 C                   EVAL      E1DANO=0                                                              120209
+0341.00 C                   END                                                                             120209
+0342.00                                                                                                     080121
+0343.00 C*                  write     IPO100HB                                                              080121
+0344.00 C                   write     ORDERS1                                                               080121
+0345.00 C*                  write     ORDERS2                                                               120220
+0346.00 C                   write     DCO                                                                   080121
+0347.00                                                                                                     070425
+0348.00  * Read next record                                                                                 070425
+0349.00                                                                                                     070425
+0350.00 C/EXEC SQL                                                                                          070425
+0351.00 C+   FETCH ords1 into :datainds                                                                     080121
+0352.00 C/END-EXEC                                                                                          070425
+0353.00                                                                                                     070425
+0354.00 C                   ENDDO                                                                           070425
+0355.00                                                                                                     070425
+0356.00  * Close Cursor                                                                                     070425
+0357.00                                                                                                     070425
+0358.00 C/EXEC SQL                                                                                          070425
+0359.00 C+  CLOSE ords1                                                                                     080121
+0360.00 C/END-EXEC                                                                                          070425 
+0361.00                                                                                                     070425 
+0362.00 C                   ENDSR                                                                           070425 
+0363.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070425 
+0364.00  ** PROCESSORDERS3 -  Read and convert any Order detail records      ** **                          080121 
+0365.00  ** - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -** **                          070425 
+0366.00 C     PROCESSORDERS3BEGSR                                                                           080121 
+0367.00                                                                                                     070425 
+0368.00  * Declare cursor                                                                                   070425 
+0369.00                                                                                                     070425 
+0370.00 C/EXEC SQL                                                                                          070425 
+0371.00 C+   DECLARE ORDS3 CURSOR                                                                           080121 
+0372.00 C+   for SELECT *                                                                                   070425 
+0373.00 C+       FROM inbound                                                                               070607 
+0374.00 C+       WHERE substr(datain,1,2) = 'OL'                                                            070607 
+0375.00 C+    FOR FETCH only                                                                                070425 
+0376.00 C/END-EXEC                                                                                          070425 
+0377.00                                                                                                     070425 
+0378.00  * Open Cursor                                                                                      070425 
+0379.00                                                                                                     070425 
+0380.00 C/EXEC SQL                                                                                          070425
+0381.00 C+   OPEN ORDS3                                                                                     080121
+0382.00 C/END-EXEC                                                                                          070425
+0383.00                                                                                                     070425
+0384.00  * Read first record                                                                                070425
+0385.00                                                                                                     070425
+0386.00 C/EXEC SQL                                                                                          070425
+0387.00 C+   FETCH ORDS3 into :datainds                                                                     080121
+0388.00 C/END-EXEC                                                                                          070425
+0389.00                                                                                                     070425
+0390.00  * Process while records read                                                                       070425
+0391.00                                                                                                     070425
+0392.00 C                   DOW       sqlcod = *zeros                                                       070425
+0393.00 C                   movel     datainds      wolbinds                                                070614
+0394.00                                                                                                     070425
+0395.00 C                   EVAL      E3QT15=(%DEC(OLQTOS:15:0))/1000                                       080206
+0396.00 C*                  EVAL      E3ECSN=%DEC(OLGUI:15:0)                                               100210
+0397.00 C*                  EVAL      E3CORN=OLCPO                                                          080206
+0398.00 C*                  EVAL      E3CUNO=OLSHE                                                          080219
+0399.00 C* E3line,E3LIN6,E3ELIN                                                                             150221
+0400.00 C                   EVAL      E3LINE=%DEC(OLPOL:5:0)                                                080206
+0401.00 C                   EVAL      E3LIN6=%DEC(OLPOL:5:0)                                                150221
+0402.00 C                   EVAL      E3ELIN=OLPOL                                                          150221
+0403.00 C                   EVAL      E3OQTY=E3QT15                                                         080121
+0404.00 C                   EVAL      E3PQTY=E3QT15                                                         080121
+0405.00 C***                EVAL      E3PRDC=OLITN                                                          100223
+0406.00 C                   EVAL      E3PRDC=*BLANKS                                                        100223
+0407.00 C                   EVAL      E3PRDC=*BLANKS                                                        100225
+0408.00 C                   EVAL      E3PRDC=*BLANKS                                                        100225
+0409.00 C                   EVAL      E3PRDC=*BLANKS                                                        100225
+0410.00 C*    OHRQDS        IFGT      '00000000'                                                            201201
+0411.00 C*                  MOVE      OHRQDS        E3RDVD                                                  110223
+0412.00 C*                  MOVE      OHRQDS        E3RDDB                                                  110223
+0413.00 C*                  MOVE      OHRQDS        E3RDDT                                                  110223
+0414.00 C*                  ELSE                                                                            201201
+0415.00 C*                  MOVE      OLRQDS        E3RDVD                                                  110223
+0416.00 C*                  MOVE      OLRQDS        E3RDDB                                                  110223
+0417.00 C*                  MOVE      OLRQDS        E3RDDT                                                  110223
+0418.00 C*                  END                                                                             201201
+0419.00 C     OLRQDS        IFGT      '00000000'                                                            201201
+0420.00 C                   MOVE      OLRQDS        E3RDVD                                                  201201
+0421.00 C                   MOVE      OLRQDS        E3RDDB                                                  201201
+0422.00 C                   MOVE      OLRQDS        E3RDDT                                                  201201
+0423.00 C                                                                                                   201201
+0424.00 C*                  ELSE                                                                            201201
+0425.00 C*                  MOVE      OHRQDS        E3RDVD                                                  201201
+0426.00 C*                  MOVE      OHRQDS        E3RDDB                                                  201201
+0427.00 C*                  MOVE      OHRQDS        E3RDDT                                                  201201
+0428.00 C                                                                                                   201201
+0429.00 C                   END                                                                             201201
+0430.00 C     OLSID         IFEQ      '925485US00'                                                          150305
+0431.00 C                   MOVE      *BLANKS       Part1Date        14                                     100304
+0432.00 C                   MOVE      *BLANKS       Part2Date        14                                     100304
+0433.00 C                   move      OHCNDS        WRKDTE                                                  100304
+0434.00 C     'SNL-'        CAT       MM:0          PART1DATE                                               100304
+0435.00 C                   CAT       '/':0         PART1DATE                                               100304
+0436.00 C                   CAT       DD:0          PART1DATE                                               100304
+0437.00 C                   CAT       '/':0         PART1DATE                                               100304
+0438.00 C                   CAT       CY:0          PART1DATE                                               100304
+0439.00 C                   move      OHDLDS        WRKDTE                                                  100304
+0440.00 C     'DND-'        CAT       MM:0          PART2DATE                                               100304
+0441.00 C                   CAT       '/':0         PART2DATE                                               100304
+0442.00 C                   CAT       DD:0          PART2DATE                                               100304
+0443.00 C                   CAT       '/':0         PART2DATE                                               100304
+0444.00 C                   CAT       CY:0          PART2DATE                                               100304
+0445.00 C                   MOVEL     PART1Date     E3SHPM                                                  100304
+0446.00 C                   MOVE      PART2Date     E3SHPM                                                  100304
+0447.00 C                   ELSE                                                                            150305
+0448.00 C                   EVAL      E3SHPM=OLVNI                                                          150305
+0449.00 C                   END                                                                             150305
+0450.00 C                   MOVE      *BLANKS       E3PRDC                                                  100316
+0451.00  * o Modify the logic for handling incoming 850 documents to use a lookup in our                    241106
+0452.00  *   cross-reference table.                                                                         241106
+0453.00  * o The new logic should retrieve our part number based on:                                        241106
+0454.00  *   o First, locating the business partner ID using the trading partner ID in the DI methods       241106
+0455.00  *     table.                                                                                       241106
+0456.00 C                   MOVE      *BLANKS       CUNUM            10            business partner ID      241106
+0457.00 C/EXEC SQL                                                                                          241106
+0458.00 C+       SELECT a.EPNUM                                                                             241106
+0459.00 C+       INTO :CUNUM                                                                                241106
+0460.00 C+       FROM srotpi a                                                                              241106
+0461.00 C+       WHERE EXISTS (                                                                             241106
+0462.00 C+         SELECT b.EPEADR                                                                          241106
+0463.00 C+         FROM srotpi b                                                                            241106
+0464.00 C+         WHERE a.EPEADR = b.EPEADR                                                                241106
+0465.00 C+          AND A.EPMENA = 'EDI/400'                                                                241106
+0466.00 C+          AND b.EPMENA = 'EDI/400'                                                                241106
+0467.00 C+          AND b.EPEADR = :OHSID                                                                   241106
+0468.00 C+         GROUP BY b.EPEADR                                                                        241106
+0469.00 C+         HAVING count(*) = 1                                                                      241106
+0470.00 C+         )                                                                                        241106
+0471.00 C/END-EXEC                                                                                          241106
+0472.00  *   o Then, using this business partner ID alongside the vendor number (from the flat file, at     241106
+0473.00  *     field OLVNI) to get our part number.                                                         241106
+0474.00 C/EXEC SQL                                                                                          241106
+0475.00 C+       SELECT PCIPRC                                                                              241114
+0476.00 C+       INTO :E3PRDC                                                                               241106
+0477.00 C+       FROM SROPCR                                                                                241106
+0478.00 C+       WHERE PCNANO = :CUNUM                                                                      241106
+0479.00 C+        AND PCXPRC = :OLVNI                                                                       241106
+0480.00 C+        AND PCXRTY = 'CU'                                                                         241106 
+0481.00 C/END-EXEC                                                                                          241106 
+0482.00  * o If a SKU number exists in the flat file (field OLVNN), we need to capture it.                  241113 
+0483.00 C                   If        E3PRDC <> *Blank                                                      241106 
+0484.00 C                   If        OLVNN <> *Blank                                                       241106 
+0485.00  * o Ensure this SKU is stored in a way that allows it to be included in subsequent 855, 856,       241113 
+0486.00  *   and 810 files.                                                                                 241113 
+0487.00 C/EXEC SQL                                                                                          241108 
+0488.00 C+       INSERT INTO SROPCR (                                                                       241108 
+0489.00 C+        PCXRTY                                                                                    241108 
+0490.00 C+        ,PCIPRC                                                                                   241108 
+0491.00 C+        ,PCNANO                                                                                   241108 
+0492.00 C+        ,PCXPRC                                                                                   241108 
+0493.00 C+        ,PCSOBR                                                                                   241108 
+0494.00 C+        ,PCESPR                                                                                   241108 
+0495.00 C+        ,PCSOAW                                                                                   241108 
+0496.00 C+        ,PCSWSH                                                                                   241108 
+0497.00 C+        )                                                                                         241108 
+0498.00 C+       VALUES (                                                                                   241108 
+0499.00 C+        'SK'                                                                                      241114 
+0500.00 C+        ,:E3PRDC                                                                                  241108
+0501.00 C+        ,:CUNUM                                                                                   241108
+0502.00 C+        ,:OLVNN                                                                                   241108
+0503.00 C+        ,'N'                                                                                      241108
+0504.00 C+        ,:OLVNN                                                                                   241108
+0505.00 C+        ,'N'                                                                                      241108
+0506.00 C+        ,'N'                                                                                      241108
+0507.00 C+        )                                                                                         241108
+0508.00 C+       EXCEPT                                                                                     241108
+0509.00 C+                                                                                                  241108
+0510.00 C+       SELECT PCXRTY                                                                              241108
+0511.00 C+        ,PCIPRC                                                                                   241108
+0512.00 C+        ,PCNANO                                                                                   241108
+0513.00 C+        ,PCXPRC                                                                                   241108
+0514.00 C+        ,PCSOBR                                                                                   241108
+0515.00 C+        ,PCESPR                                                                                   241108
+0516.00 C+        ,PCSOAW                                                                                   241108
+0517.00 C+        ,PCSWSH                                                                                   241108
+0518.00 C+       FROM SROPCR                                                                                241108
+0519.00 C/END-EXEC                                                                                          241108
+0520.00 C                   Endif                                                  OLVNN <> *Blank          241106
+0521.00 C                   Else                                                   E3PRDC = *Blank          241106
+0522.00                                                                                                     080307
+0523.00 C/EXEC SQL                                                                                          100223
+0524.00 C+       SELECT PCIPRC into :E3PRDC                                                                 110203
+0525.00 C+       FROM SROPCR                                                                                100223
+0526.00 C+       WHERE PCNANO = :OHSID                                                                      100223
+0527.00 C+       AND PCXPRC   = :OLUSD                                                                      100223
+0528.00 C+       AND PCXRTY   = 'UP'                                                                        100223
+0529.00 C/END-EXEC                                                                                          100223
+0530.00                                                                                                     100223
+0531.00 C                   EndIf                                                                           241106
+0532.00 C                   If        E3PRDC = *Blank                                                       080307
+0533.00 C                   EVAL      E3PRDC=OLUSD                                                          120220
+0534.00  *                                                                                                  241202
+0535.00  * o ELSE - Use the E3PRDC <> *Blank from the captured 'SKU number'                                 241205
+0536.00  *                                                                                                  241205
+0537.00 C                   Else                                                                            241205
+0538.00  *                                                                                                  241205
+0539.00 C                   If        CUNUM <> *Blank                              Wal-Mart = *Blank        241205
+0540.00  * o Ensure this UPC is stored in a way that allows it to be included in subsequent 855, 856,       241202
+0541.00  *   and 810 files.                                                                                 241202
+0542.00 C/EXEC SQL                                                                                          241202
+0543.00 C+       INSERT INTO SROPCR (                                                                       241202
+0544.00 C+        PCXRTY                                                                                    241202
+0545.00 C+        ,PCIPRC                                                                                   241202
+0546.00 C+        ,PCNANO                                                                                   241202
+0547.00 C+        ,PCXPRC                                                                                   241202
+0548.00 C+        ,PCSOBR                                                                                   241202
+0549.00 C+        ,PCESPR                                                                                   241202
+0550.00 C+        ,PCSOAW                                                                                   241202
+0551.00 C+        ,PCSWSH                                                                                   241202
+0552.00 C+        )                                                                                         241202
+0553.00 C+       VALUES (                                                                                   241202
+0554.00 C+        'UP'                                                                                      241202
+0555.00 C+        ,:E3PRDC                                                                                  241202
+0556.00 C+        ,:CUNUM                                                                                   241202
+0557.00 C+        ,:OLUSD                                                                                   241202
+0558.00 C+        ,'N'                                                                                      241202
+0559.00 C+        ,:OLUSD                                                                                   241202
+0560.00 C+        ,'N'                                                                                      241202
+0561.00 C+        ,'N'                                                                                      241202
+0562.00 C+        )                                                                                         241202
+0563.00 C+       EXCEPT                                                                                     241202
+0564.00 C+                                                                                                  241202
+0565.00 C+       SELECT PCXRTY                                                                              241202
+0566.00 C+        ,PCIPRC                                                                                   241202
+0567.00 C+        ,PCNANO                                                                                   241202
+0568.00 C+        ,PCXPRC                                                                                   241202
+0569.00 C+        ,PCSOBR                                                                                   241202
+0570.00 C+        ,PCESPR                                                                                   241202
+0571.00 C+        ,PCSOAW                                                                                   241202
+0572.00 C+        ,PCSWSH                                                                                   241202
+0573.00 C+       FROM SROPCR                                                                                241202
+0574.00 C/END-EXEC                                                                                          241202
+0575.00 C                   EndIf                                                                           241202
+0576.00  *                                                                                                  241202
+0577.00 C                   EndIf                                                                           080307
+0578.00 C**                Use item sent in if no Xref Found                                                120220
+0579.00 C                   If        E3PRDC = *Blank                                                       120220
+0580.00 C                   EVAL      E3PRDC=OLITN                                                          120220
+0581.00 C                   EndIf                                                                           120220
+0582.00                                                                                                     080307
+0583.00 C*                  EVAL      E3EMSN=OLMSN                                                          100210
+0584.00 C                   EVAL      E3EMSN=OLGUI                                                          100211
+0585.00 C                   write     ORDERS3                                                               080121
+0586.00                                                                                                     070425
+0587.00  * Read next record                                                                                 070425
+0588.00                                                                                                     070425
+0589.00 C/EXEC SQL                                                                                          070425
+0590.00 C+   FETCH ORDS3 into :datainds                                                                     080121
+0591.00 C/END-EXEC                                                                                          070425
+0592.00                                                                                                     070425
+0593.00 C                   ENDDO                                                                           070425
+0594.00                                                                                                     070425
+0595.00  * Close Cursor                                                                                     070425
+0596.00                                                                                                     070425
+0597.00 C/EXEC SQL                                                                                          070425
+0598.00 C+  CLOSE ORDS3                                                                                     080121
+0599.00 C/END-EXEC                                                                                          070425
+0600.00 C                   ENDSR                                                                           070425               
+        ****************** End of data ******************************************************************************************
